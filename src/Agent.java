@@ -1,40 +1,96 @@
 ///TetrisBalu,h375633@stud.u-szeged.hu
 
 import java.util.*;
-
 import game.tetris.TetrisAction;
 import game.tetris.TetrisGame;
 import game.tetris.utils.TetrisState;
 import game.tetris.utils.Tetromino;
-
-
+/**
+ A Tetris játék mesterséges intelligencia alapú játékosát megvalósító osztály.
+ Az osztály a {@link game.tetris.TetrisPlayer} alaposztályból származik,
+ és annak működését kiegészítve valósítja meg a játékos döntéshozatali
+ stratégiáját.
+ @author Balázs
+ @version 1.0
+ */
 public class Agent extends game.tetris.TetrisPlayer
 {
+    /**
+     * Létrehozza a játékost a megadott beállításokkal.
+     *
+     * @param color a játékos színét azonosító érték
+     * @param random a véletlenszám-generátor példánya
+     * @param state a játék aktuális állapotát reprezentáló objektum
+     */
     public Agent(int color, Random random, TetrisState state) {
         super(color, random, state);
     }
-
+    /**
+     * Az egyes tetrominókhoz tartozó lehetséges forgatási állapotokat tároló gyorsítótár.
+     * A kulcs az elem azonosítására szolgáló szöveges érték,
+     * az érték pedig az elem lehetséges forgatásait tartalmazó lista.
+     */
     private Map<String, List<Rotation>> rotationCache = new HashMap<>();
+    /**
+     * Az egyes tetrominókhoz tartozó lehetséges elhelyezési pozíciókat tároló gyorsítótár.
+     * A kulcs az elem azonosítására szolgáló szöveges érték,
+     * az érték pedig az elhelyezési pozíciókat tartalmazó egész számok listája.
+     */
     private Map<String, List<Integer>> placementCache = new HashMap<>();
+    /**
+     * Az előre megtervezett játékakciókat tároló sor.
+     * Az akciók egész számokkal vannak reprezentálva, és a végrehajtás
+     * sorrendjében kerülnek feldolgozásra.
+     */
     private Deque<Integer> plannedActions = new ArrayDeque<>();
-
+    /**
+     * Egy tetrominó adott forgatási állapotát és az eléréséhez szükséges
+     * forgatások számát tároló belső osztály.
+     */
     private static class Rotation {
+        /** A tetrominó aktuális forgatási állapotát reprezentáló objektum. */
         Tetromino tetromino;
-        int count;//Hányadik forgatással kaptam mg az alakot
-
+        /** Az eredeti alakzatból kiindulva végrehajtott forgatások száma. */
+        int count;
+        /**
+         * Létrehoz egy forgatási állapotot a megadott tetrominóval
+         * és a hozzá tartozó forgatások számával.
+         *
+         * @param tetromino a forgatott tetrominó
+         * @param count az alakzat eléréséhez szükséges forgatások száma
+         */
         Rotation(Tetromino tetromino, int count) {
             this.tetromino = tetromino;
             this.count = count;
         }
     }
 
+    /**
+     * Egy lehetséges tetrominó-elhelyezés eredményét és annak kiértékeléséhez
+     * szükséges adatokat tároló belső osztály.
+     */
     private class PlacementResult {
+        /** Az elhelyezés végrehajtása utáni játékállapot. */
         TetrisState state;
+        /** Az elhelyezés kiindulási pozíciója. */
         int startPosition;
+        /** Az elhelyezéshez szükséges forgatások száma. */
         int rotationCount;
+        /** A tetrominó vízszintes elhelyezkedését meghatározó pozíció. */
         int horizontalPosition;
+        /** Az elhelyezés utáni játékállapot kiértékelésének eredménye. */
         StateEvaluation evaluation;
 
+        /**
+         * Létrehoz egy elhelyezési eredményt a megadott játékállapottal,
+         * pozícióadatokkal és kiértékeléssel.
+         *
+         * @param state az elhelyezés utáni játékállapot
+         * @param startPosition az elhelyezés kiindulási pozíciója
+         * @param rotationCount az elhelyezéshez szükséges forgatások száma
+         * @param horizontalPosition a tetrominó vízszintes pozíciója
+         * @param evaluation az elhelyezés utáni játékállapot kiértékelése
+         */
         PlacementResult(
                 TetrisState state,
                 int startPosition,
@@ -50,22 +106,50 @@ public class Agent extends game.tetris.TetrisPlayer
         }
     }
 
+    /**
+     * A játéktáblán található üres területet reprezentáló belső osztály.
+     */
     private static class Hole {
+        /** Az üres terület mérete. */
         int size;
+        /** Az üres terület legfelső sorának indexe. */
         int topRow;
 
+        /**
+         * Létrehoz egy üres területet a megadott mérettel és kezdősorral.
+         *
+         * @param size az üres terület mérete
+         * @param topRow az üres terület legfelső sorának indexe
+         */
         Hole(int size, int topRow) {
             this.size = size;
             this.topRow = topRow;
         }
     }
 
+    /**
+     * A játéktáblán található téglalap alakú üres területet reprezentáló
+     * belső osztály.
+     */
     private static class EmptyRegion {
+        /** Az üres terület mezőinek száma. */
         int size;
+        /** Az üres terület szélessége mezőkben kifejezve. */
         int width;
+        /** Az üres terület legfelső sorának indexe. */
         int topRow;
+        /** Az üres terület legalsó sorának indexe. */
         int bottomRow;
 
+        /**
+         * Létrehoz egy téglalap alakú üres területet a megadott
+         * szélességű és függőleges kiterjedésű tartományban.
+         * Az üres terület méretét a konstruktor automatikusan kiszámítja.
+         *
+         * @param width az üres terület szélessége mezőkben kifejezve
+         * @param topRow az üres terület legfelső sorának indexe
+         * @param bottomRow az üres terület legalsó sorának indexe
+         */
         EmptyRegion(int width, int topRow, int bottomRow) {
             this.width = width;
             this.topRow = topRow;
@@ -74,14 +158,31 @@ public class Agent extends game.tetris.TetrisPlayer
         }
     }
 
+    /**
+     * A játéktábla aktuális állapotának kiértékeléséhez szükséges
+     * adatokat összefoglaló belső osztály.
+     */
     private static class StateEvaluation {
+        /** Az adott lépés során törölt sorok száma. */
         int clearedLines;
+        /** A játéktáblán található legmagasabb kitöltött oszlop magassága. */
         int boardHeight;
+        /** A játéktábla kitöltöttségének aránya. */
         double fillRatio;
-
+        /** A játéktáblán található lyukak listája. */
         List<Hole> holes;
+        /** A játéktáblán található összefüggő üres téglalap alakú területek listája. */
         List<EmptyRegion> emptyRegions;
 
+        /**
+         * Létrehoz egy kiértékelési objektumot a megadott játékállapot-jellemzőkkel.
+         *
+         * @param clearedLines az adott lépés során törölt sorok száma
+         * @param boardHeight a játéktábla magassága
+         * @param fillRatio a játéktábla kitöltöttségének aránya
+         * @param holes a játéktáblán található lyukak listája
+         * @param emptyRegions az összefüggő üres területek listája
+         */
         StateEvaluation(
                 int clearedLines,
                 int boardHeight,
@@ -97,6 +198,21 @@ public class Agent extends game.tetris.TetrisPlayer
         }
     }
 
+    /**
+     * Meghatározza és visszaadja a következő végrehajtandó játékakciót.
+     *
+     * Ha nincs előre megtervezett művelet, megkeresi a tetrominó
+     * legkedvezőbb elhelyezését, majd elkészíti az ahhoz szükséges
+     * műveletek sorozatát.
+     *
+     * A megtervezett műveletek közül mindig a következő kerül
+     * végrehajtásra. A végrehajtott akcióval a játékállapot is frissül.
+     * Ha nem áll rendelkezésre végrehajtható művelet, a metódus
+     * üres műveletet ad vissza.
+     *
+     * @param remainingTime a döntés meghozatalára rendelkezésre álló időkeret
+     * @return a következő végrehajtandó játékakció
+     */
     @Override
     public TetrisAction getAction(long remainingTime) {
         if (plannedActions.isEmpty()) {
@@ -112,6 +228,20 @@ public class Agent extends game.tetris.TetrisPlayer
         return new TetrisAction(TetrisGame.NONE);
     }
 
+    /**
+     * Megkeresi az aktuális tetrominó legkedvezőbb elhelyezését a játéktáblán.
+     *
+     * Megvizsgálja az aktuális tetrominó összes különböző forgatási állapotát
+     * és az azokhoz tartozó lehetséges vízszintes pozíciókat. Minden lehetséges
+     * elhelyezést szimulál, majd az így kapott játékállapot alapján a következő
+     * tetrominó lehetséges elhelyezését is kiértékeli.
+     *
+     * A lehetséges elhelyezések közül a legkedvezőbb kiértékelést eredményező
+     * elhelyezést választja ki.
+     *
+     * @return a legkedvezőbb elhelyezést leíró objektum, vagy null,
+     *         ha nem található megfelelő elhelyezés
+     */
     private PlacementResult findBestPlacement() {
 
         List<Rotation> rotations = getUniqueRotations(state.current());//Különböző forgatások összegyűjtése
@@ -142,6 +272,18 @@ public class Agent extends game.tetris.TetrisPlayer
         return bestResult;
     }
 
+    /**
+     * Meghatározza az adott tetrominó különböző forgatási állapotait.
+     *
+     * A metódus először ellenőrzi, hogy az adott tetrominó forgatási
+     * állapotai szerepelnek-e már a gyorsítótárban. Ha igen, visszaadja
+     * a korábban eltárolt eredményt. Ellenkező esetben előállítja az
+     * összes lehetséges forgatást, kiszűri az egymással megegyező
+     * alakzatokat, majd eltárolja az eredményt a gyorsítótárban.
+     *
+     * @param original az eredeti tetrominó
+     * @return a tetrominó különböző forgatási állapotait tartalmazó lista
+     */
     private List<Rotation> getUniqueRotations(Tetromino original) {
 
         // Cache ellenőrzése
@@ -175,6 +317,21 @@ public class Agent extends game.tetris.TetrisPlayer
         return rotations;
     }
 
+    /**
+     * Meghatározza a tetrominó adott forgatási állapotához tartozó
+     * lehetséges vízszintes elhelyezési pozíciókat.
+     *
+     * A metódus figyelembe veszi a játéktábla szélességét és a tetrominó
+     * ténylegesen foglalt mezőinek szélső oszlopait, így csak olyan
+     * pozíciókat ad vissza, amelyeknél az alakzat teljes egészében
+     * a játéktáblán belül marad.
+     *
+     * Az eredményt gyorsítótárban tárolja, és ha az adott forgatási
+     * állapothoz már rendelkezésre áll, a korábban kiszámított listát adja vissza.
+     *
+     * @param rotation a vizsgált tetrominó forgatási állapota
+     * @return a lehetséges vízszintes elhelyezési pozíciók listája
+     */
     private List<Integer> getHorizontalPositions(Rotation rotation) {
 
         //Cach key létrehozása az egyedi forgatásnak megfelelően
@@ -219,6 +376,26 @@ public class Agent extends game.tetris.TetrisPlayer
         return positions;
     }
 
+    /**
+     * Szimulálja a tetrominó megadott forgatási állapotban és vízszintes
+     * pozícióban történő elhelyezését a játéktábla egy másolatán.
+     *
+     * A metódus eltávolítja az aktuális tetrominót és annak árnyékát,
+     * beállítja az új forgatási állapotot és pozíciót, majd kiszámítja
+     * az árnyék új helyzetét. Ezt követően végrehajtja az elem lerakását.
+     *
+     * Ha a játék folytatódik, és a kiértékelés engedélyezett, meghatározza
+     * a lerakás utáni játékállapot értékeléséhez szükséges adatokat is.
+     *
+     * Az eredeti játékállapotot nem módosítja, a műveleteket annak másolatán
+     * hajtja végre.
+     *
+     * @param sourceState a szimuláció kiindulási játékállapota
+     * @param rotation a tetrominó vizsgált forgatási állapota
+     * @param position a tetrominó vízszintes elhelyezési pozíciója
+     * @param evaluate megadja, hogy a lerakás utáni játékállapotot is ki kell-e értékelni
+     * @return a szimulált elhelyezés eredményét és az ahhoz tartozó adatokat tartalmazó objektum
+     */
     private PlacementResult simulatePlacement(
             TetrisState sourceState,
             Rotation rotation,
@@ -324,7 +501,19 @@ public class Agent extends game.tetris.TetrisPlayer
         );
     }
 
-    //Második elem elhelyezésének elemzése
+    /**
+     * Meghatározza a következő tetrominó legkedvezőbb elhelyezését
+     * a megadott játékállapot alapján.
+     *
+     * Megvizsgálja a következő tetrominó összes különböző forgatási
+     * állapotát és az azokhoz tartozó lehetséges vízszintes pozíciókat.
+     * Minden lehetséges elhelyezést szimulál és kiértékel, majd
+     * kiválasztja a legkedvezőbb eredményt adó elhelyezést.
+     *
+     * @param sourceState a szimuláció kiindulási játékállapota
+     * @return a legkedvezőbb elhelyezést leíró objektum, vagy null,
+     *         ha nem található kiértékelhető elhelyezés
+     */
     private PlacementResult evaluateNextPlacement(TetrisState sourceState) {
 
         PlacementResult bestResult = null;
@@ -353,6 +542,18 @@ public class Agent extends game.tetris.TetrisPlayer
         return bestResult;
     }
 
+    /**
+     * Összeállítja a tetrominó kívánt elhelyezéséhez szükséges játékakciók sorozatát.
+     *
+     * A műveleteket a következő sorrendben állítja össze: először végrehajtja
+     * a szükséges forgatásokat, majd a vízszintes mozgatásokat, végül pedig
+     * a tetrominó lerakását.
+     *
+     * @param startPosition a tetrominó kiindulási vízszintes pozíciója
+     * @param targetPosition a tetrominó célzott vízszintes pozíciója
+     * @param rotationCount a végrehajtandó forgatások száma
+     * @return a szükséges játékakciókat végrehajtási sorrendben tartalmazó sor
+     */
     private Deque<Integer> getPlacementActions(
             int startPosition,
             int targetPosition,
@@ -381,7 +582,17 @@ public class Agent extends game.tetris.TetrisPlayer
         actions.addLast(TetrisGame.DROP);
         return actions;
     }
-
+    /**
+     * Létrehozza a kiválasztott tetrominó-elhelyezés végrehajtásához szükséges
+     * játékakciók sorozatát.
+     *
+     * Először törli a korábban eltárolt akciókat, majd a megadott elhelyezési
+     * eredmény alapján meghatározza és eltárolja a szükséges forgatási,
+     * vízszintes mozgatási és lerakási műveleteket. Ha nem áll rendelkezésre
+     * érvényes elhelyezési eredmény, a műveletsor üres marad.
+     *
+     * @param bestResult a legkedvezőbb elhelyezést leíró objektum
+     */
     private void createActionPlan(PlacementResult bestResult) {
 
         plannedActions.clear();
@@ -396,7 +607,21 @@ public class Agent extends game.tetris.TetrisPlayer
         );
     }
 
-    //State értékelése
+    /**
+     * Kiértékeli a megadott játékállapotot a stratégia szempontjából fontos
+     * jellemzők meghatározásával.
+     *
+     * Meghatározza a törölt sorok számát, a játéktábla magasságát és
+     * kitöltöttségi arányát, valamint összegyűjti a táblán található
+     * lyukakat és összefüggő üres területeket.
+     *
+     * Az eredményeket egy StateEvaluation objektumban foglalja össze,
+     * amely a játékállapotok összehasonlításához használható.
+     *
+     * @param state a kiértékelendő játékállapot
+     * @param previousClearedLines a kiindulási állapotban már törölt sorok száma
+     * @return a játékállapot kiértékelésének eredménye
+     */
     private StateEvaluation evaluateState(
             TetrisState state,
             int previousClearedLines) {
@@ -418,7 +643,14 @@ public class Agent extends game.tetris.TetrisPlayer
                 holes,
                 emptyRegions);
     }
-
+    /**
+     * Meghatározza, hogy a megadott játékállapotban hány új sor törlődött
+     * a kiindulási állapothoz képest.
+     *
+     * @param state a vizsgált játékállapot
+     * @param previousClearedLines a kiindulási állapotban már törölt sorok száma
+     * @return a két játékállapot közötti törölt sorok számának különbsége
+     */
     private int evaluateClearedLines(
             TetrisState state,
             int previousClearedLines) {
@@ -426,6 +658,12 @@ public class Agent extends game.tetris.TetrisPlayer
         return state.linesCleared - previousClearedLines;//Törölt sorok különbségének meghatározása
     }
 
+    /**
+     * Meghatározza a lerakott játékelemek által elfoglalt pálya magasságát.
+     *
+     * @param state a játék aktuális állapotát tartalmazó objektum
+     * @return a lerakott elemek által elfoglalt pálya magassága; ha a pálya üres, 0
+     */
     private int evaluateBoardHeight(TetrisState state) {
 
         int boardHeight = state.board.length;
@@ -443,6 +681,14 @@ public class Agent extends game.tetris.TetrisPlayer
         return 0;
     }
 
+    /**
+     * Kiszámítja a lerakott játékelemek által elfoglalt cellák arányát
+     * a pálya teljes, megadott magasságú területéhez viszonyítva.
+     *
+     * @param state a játék aktuális állapotát tartalmazó objektum
+     * @param boardHeight a lerakott elemek által elfoglalt pálya magassága
+     * @return a kitöltött cellák aránya; ha a pálya magassága 0, akkor 0.0
+     */
     private double evaluateFillRatio(TetrisState state, double boardHeight) {
 
         if (boardHeight == 0) {return 0.0;}
@@ -462,6 +708,13 @@ public class Agent extends game.tetris.TetrisPlayer
         return occupiedCells / (boardHeight * state.board[0].length);//Arány számítása
     }
 
+    /**
+     * Megkeresi a játéktáblán található lyukakat, és meghatározza az összefüggő
+     * lyukrégiók méretét, valamint azok legfelső sorának pozícióját.
+     *
+     * @param state a játék aktuális állapotát tartalmazó objektum
+     * @return a megtalált lyukrégiókat tartalmazó lista; üres pálya esetén üres lista
+     */
     private List<Hole> evaluateHoles(TetrisState state) {
 
         int[][] board = state.board;
@@ -567,12 +820,25 @@ public class Agent extends game.tetris.TetrisPlayer
         return holes;
     }
 
-    //Keresés:
-    //Először meghatározzuk az első és az utolsó olyan sort, amelyben már van lerakott elem.
-    //Ezután oszloponként, balról jobbra haladva megkeressük az üres, függőleges szakaszokat.
-    //Csak azokat az üres cellákat vesszük figyelembe, amelyek fölött az adott oszlopban nincs lerakott elem.
-    //Két szomszédos oszlopban található szakaszt csak akkor vonunk össze egy régióvá, ha pontosan ugyanabban a sorban kezdődnek és ugyanabban a sorban végződnek.
-    //Minden régióhoz eltároljuk a szélességet, a felső és alsó sorát, valamint a területét (size).
+    /**
+     * Megkeresi a játéktáblán található összefüggő üres régiókat, és meghatározza
+     * azok méretét, szélességét, valamint felső és alsó sorának pozícióját.
+     * A vizsgálat csak azokat az üres cellákat veszi figyelembe, amelyek felett
+     * az adott oszlopban nem található lerakott játékelem
+     *
+     * Keresés:
+     * Először meghatározzuk az első és az utolsó olyan sort, amelyben már van lerakott elem.
+     * Ezután oszloponként, balról jobbra haladva megkeressük az üres, függőleges szakaszokat.
+     * Csak azokat az üres cellákat vesszük figyelembe, amelyek fölött az adott oszlopban nincs lerakott elem.
+     * Két szomszédos oszlopban található szakaszt csak akkor vonunk össze egy régióvá, ha pontosan ugyanabban a sorban kezdődnek és ugyanabban a sorban végződnek.
+     * Minden régióhoz eltároljuk a szélességet, a felső és alsó sorát, valamint a területét (size).
+     *
+     * @param state a játék aktuális állapotát tartalmazó objektum
+     * @param maxRow a vizsgálat során figyelembe vehető legalsó sor indexe
+     * @return a megtalált üres régiókat tartalmazó lista; ha nincs értékelhető
+     *         régió, üres listát ad vissza
+     */
+
     private List<EmptyRegion> evaluateEmptyRegions(
             TetrisState state,
             int maxRow) {
@@ -733,6 +999,18 @@ public class Agent extends game.tetris.TetrisPlayer
         return regions;
     }
 
+    /**
+     * Összehasonlít két kiértékelt játékállapotot az előre meghatározott
+     * szempontok alapján. Az összehasonlítás prioritási sorrendben
+     * vizsgálja a törölt sorok számát, a pálya magasságát, a kitöltöttségi
+     * arányt, a lyukak számát és az üres régiók számát.
+     *
+     * @param first az első összehasonlítandó játékállapot kiértékelése
+     * @param second a második összehasonlítandó játékállapot kiértékelése
+     * @return negatív érték, ha az első állapot kedvezőbb,
+     *         pozitív érték, ha a második állapot kedvezőbb,
+     *         0, ha a két állapot az összehasonlítás alapján egyenértékű
+     */
     private int compareStates(
             StateEvaluation first,
             StateEvaluation second) {
